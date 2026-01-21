@@ -27,27 +27,68 @@ def process_mask(mask):
     return mask
 
 
-def find_and_draw(mask, frame, label):
+def find_and_draw(mask, frame_draw, label, draw=True):
+    
+    """
+    - Detecta objetos del color Rojo, Amarillo o Azul, (independientemente de cual)
+    - Si draw=True, dibuja bounding boxes y centroides de los objetos en frame
+    - Devuevle:
+        *found (bool)
+        *detected_centroids(lista)
+    """
+    
     found = False
     contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    
+    detected_centroids=[]
 
     for cnt in contours:
-        if cv.contourArea(cnt) > MIN_AREA:
-            found = True
-            x, y, w, h = cv.boundingRect(cnt)
-            cv.rectangle(frame, (x, y), (x + w, y + h), DRAW[label], 2)
-            cv.putText(frame, label, (x, y - 8),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.7,
-                       DRAW[label], 2, cv.LINE_AA)
-    return found
+        area=cv.contourArea(cnt)
+        if area > MIN_AREA:
+            
+            # Color encontrado
+            found=True
+            
+            # Centroide(s)
+            M=cv.moments(cnt)
+            
+            if M["m00"]!=0:
+            
+                cx=int(M["m10"]/M["m00"])
+                cy=int(M["m01"]/M["m00"])
+                
+                detected_centroids.append((label,cx,cy))
+                
+            if draw:
+                
+                x, y, w, h = cv.boundingRect(cnt)
+            
+                # Dibujar bounding box del color detectado
+                cv.rectangle(frame_draw, (x, y), (x + w, y + h), DRAW[label], 2)
+            
+                # Texto describiendo el color detectado
+                cv.putText(frame_draw, label, (x, y - 8), cv.FONT_HERSHEY_SIMPLEX, 0.7, DRAW[label], 2, cv.LINE_AA)
+                
+                # Círculo del centroide
+                cv.circle(frame_draw,(cx,cy), 5, (255,255,255), -1)
+               
+           
+    return found, detected_centroids
 
 
-def detect_colors(frame, draw):
+def detect_colors(frame, draw=True):
     """
-    Retorna un set con los colores detectados.
-    Si draw=True, dibuja bounding boxes en el frame.
+    - Procesa frames, y una vez detectado un color mediante find_and_draw, decide qué color (label) es
+    - Devuelve:
+        * detected_colors (set)
+        * all_centroids (lista)
+    - Sintaxsis:
+        * colors,centroids=detect_colors(frame) <--- por default dibuja
+        * colors,centroids=detect_colors(frame,draw=False) <------ solo detecta, no dibuja
     """
-    detected = set()
+    
+    detected_colors = set()
+    all_centroids=[]
 
     blurred = cv.GaussianBlur(frame, (5, 5), 0)
     hsv = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
@@ -55,33 +96,31 @@ def detect_colors(frame, draw):
     # --- Amarillo ---
     low, high = RANGES["Amarillo"]
     mask = process_mask(cv.inRange(hsv, low, high))
-    if find_and_draw(mask, frame, "Amarillo") if draw else has_object(mask):
-        detected.add("Amarillo")
+    found, centroids=find_and_draw(mask,frame,"Amarillo",draw)
+    
+    if found:
+        detected_colors.add("Amarillo")
+        all_centroids.extend(centroids)
 
     # --- Azul ---
     low, high = RANGES["Azul"]
     mask = process_mask(cv.inRange(hsv, low, high))
-    if find_and_draw(mask, frame, "Azul") if draw else has_object(mask):
-        detected.add("Azul")
+    found, centroids=find_and_draw(mask,frame,"Azul",draw)
+    
+    if found:
+        detected_colors.add("Azul")
+        all_centroids.extend(centroids)
 
+    
     # --- Rojo ---
     low1, high1 = RANGES["Rojo1"]
     low2, high2 = RANGES["Rojo2"]
-    mask = process_mask(
-        cv.bitwise_or(
-            cv.inRange(hsv, low1, high1),
-            cv.inRange(hsv, low2, high2)
-        )
-    )
-    if find_and_draw(mask, frame, "Rojo") if draw else has_object(mask):
-        detected.add("Rojo")
+    mask = process_mask(cv.bitwise_or(cv.inRange(hsv, low1, high1), cv.inRange(hsv, low2, high2)))
+    found, centroids=find_and_draw(mask,frame,"Rojo",draw)
+    
+    if found:
+        detected_colors.add("Rojo")
+        all_centroids.extend(centroids)
 
-    return detected
+    return detected_colors, all_centroids
 
-
-def has_object(mask):
-    contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    for cnt in contours:
-        if cv.contourArea(cnt) > MIN_AREA:
-            return True
-    return False
