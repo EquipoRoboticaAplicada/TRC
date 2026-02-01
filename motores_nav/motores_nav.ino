@@ -1,5 +1,5 @@
 // =====================================================
-// Control 23 Motores DC con 3 Encoders JGB37-3530
+// Control 3 Motores DC con 3 Encoders JGB37-3530
 // 3 PID independientes - ESP32 der
 // Drivers: IBT-4 (cada motor usa IN1/IN2)
 // =====================================================
@@ -45,7 +45,7 @@ struct PIDState {
   float pidOutput   = 0.0;   // 0..100%
   float pwmPercent  = 0.0;   // 0..100%
 
-  bool  direction   = false;  // true=forward, false=reverse
+  bool  direction   = true;  // true=forward, false=reverse
 };
 
 PIDState rightMotor;
@@ -192,15 +192,12 @@ void setup() {
   pinMode(ENC_A, INPUT_PULLUP);
   pinMode(ENC_B, INPUT_PULLUP);
 
-  // Entrada externa
-  pinMode(RASP_INPUT, INPUT_PULLDOWN);
-
   // Interrupts encoders
   attachInterrupt(digitalPinToInterrupt(ENC_A), ISR_R_A, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENC_B), ISR_R_B, CHANGE);
 
   // Direcciones iniciales (ajusta)
-  rightMotor.direction = true;
+  rightMotor.direction = false;
 
   lastSampleTime = millis();
 }
@@ -211,19 +208,19 @@ void setup() {
 void loop() {
 
 
-//  // Procesa entrada serial
-//  while (Serial.available()) {
-//    char c = (char)Serial.read();
-//    
-//    if (c == '\n' || c == '\r') {
-//      if (inputBuffer.length() > 0) {
-//        handleCommand(inputBuffer);
-//        inputBuffer = "";
-//      }
-//    } else {
-//      inputBuffer += c;
-//    }
-//  }
+  // Procesa entrada serial
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    
+    if (c == '\n' || c == '\r') {
+      if (inputBuffer.length() > 0) {
+        handleCommand(inputBuffer);
+        inputBuffer = "";
+      }
+    } else {
+      inputBuffer += c;
+    }
+  }
 
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
