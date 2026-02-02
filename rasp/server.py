@@ -50,9 +50,9 @@ def vision_data():
     vision_state["areas"]=data.get("areas",[])
     vision_state["time"]=data.get("time",time.time())
     
+    print("Vision state: ", vision_state)
     return jsonify({"status":"ok"})
     
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000,threaded=True)
-    vision_data()
