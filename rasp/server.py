@@ -12,7 +12,7 @@ BAUDRATE = 115200
 
 try:
     ser_left = serial.Serial(UART_LEFT, BAUDRATE, timeout=0.05)
-    ser_right = serial.Serial(UART_RIGHT, BAUDRATE, timeout=0.05)
+    # ser_right = serial.Serial(UART_RIGHT, BAUDRATE, timeout=0.05)
     print("UARTs abiertos correctamente")
 except Exception as e:
     print("Error abriendo UART:", e)
@@ -42,9 +42,14 @@ def send_rpm(left_rpm, right_rpm):
 
 vision_state = {"colors":[],"centroids":[],"areas":[],"time": 0.0}
 
-# ----- Estado de control -----
+# ---- Estado de Control -----
 
-control_state = {"colors":[],"centroids":[],"areas":[],"time": 0.0}
+control_state = {
+    "left_rpm":  "S0",
+    "right_rpm": "S0",
+    "left_dir":  "D1",
+    "right_dir": "D1"
+}
 
 # ----- Flask -----
 app = Flask(__name__)
@@ -55,17 +60,34 @@ def video_feed():
     return Response(gen_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
+
 @app.route("/command", methods=["POST"])
 def command():
-    data = request.json
-    cmd = data.get("cmd")
+    global control_state
 
-    # if cmd == "signal_on":
-    #     signal_on()
-    # elif cmd == "signal_off":
-    #     signal_off()
+    data = request.get_json(force=True) or {}
 
-    return jsonify({"status": "ok", "cmd": cmd})
+    # Extrae lo que manda la PC (ya viene como "S20", "D1", etc.)
+    left_rpm  = data.get("left_rpm",  "S0")
+    right_rpm = data.get("right_rpm", "S0")
+    left_dir  = data.get("left_dir",  "D1")
+    right_dir = data.get("right_dir", "D1")
+
+    # Guarda estado (útil para debug)
+    control_state = {
+        "left_rpm": left_rpm,
+        "right_rpm": right_rpm,
+        "left_dir": left_dir,
+        "right_dir": right_dir,
+        "time": time.time()
+    }
+
+    # DEBUG: ver qué llegó
+    print("CMD recibido:", control_state)
+
+    # Respuesta al cliente (PC)
+    return jsonify({"status": "ok", "control_state": control_state})
+
 
 @app.route("/vision_data",methods=["POST"])
 def vision_data():
@@ -77,7 +99,7 @@ def vision_data():
     vision_state["areas"]=data.get("areas",[])
     vision_state["time"]=data.get("time",time.time())
     
-    print("Vision state: ", vision_state)
+    # print("Vision state: ", vision_state)
     return jsonify({"status":"ok"})
     
 
