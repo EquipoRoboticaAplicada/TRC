@@ -10,14 +10,13 @@ import cv2 as cv
 import requests
 import time
 
-PI_IP = "192.168.1.83"
+PI_IP = "172.32.236.53"
 
 VIDEO_URL  = f"http://{PI_IP}:5000/video_feed"
 CMD_URL    = f"http://{PI_IP}:5000/command"
 VISION_URL = f"http://{PI_IP}:5000/vision_data"
 
-DETECTION_FRAMES = 15
-
+DETECTION_FRAMES = 8
 
 def send_rpms(left_rpm, right_rpm, dir_left, dir_right):   
     speed = {
@@ -114,14 +113,21 @@ def main():
     lost_count = 0
     tracking = False
 
-    SEND_HZ = 15
+    SEND_HZ = 30
     send_period = 1.0 / SEND_HZ
     last_send = 0.0
 
-    APPROACH_RPM = 20  # velocidad al acercarse
-    CRUISE_RPM = 30    # velocidad default cuando no hay tracking
+    CRUISE_RPM = 40    # velocidad default cuando no hay tracking
+    APPROACH_RPM = CRUISE_RPM  # velocidad al acercarse
     left_rpm, right_rpm = CRUISE_RPM, CRUISE_RPM  # velocidad default
     dir_left, dir_right = 1, 1     # dirección default (1=forward, 0=backward)
+
+    base = 0
+    rot = 0
+
+    mode_rotate = False  # Estado: ¿estamos en modo rotación?
+    Y_TRIGGER = 0.40
+    Y_HYST = 0.35  # histéresis: 5% de diferencia
 
     while True:
         ret, frame = cap.read()
@@ -151,11 +157,6 @@ def main():
         if (not tracking) and (seen_count >= N_ENTER):
             tracking = True
             print("Tracking ACTIVADO (detección estable)\n")
-            # print("Colores:", colors) 
-            # print("Centroides:", centroids) 
-            # print("Áreas:", areas)
-            # Aquí puedes activar “prioridad visión”    
-
 
         if tracking and (lost_count >= N_EXIT):
             tracking = False
@@ -166,29 +167,38 @@ def main():
             left_rpm, right_rpm = CRUISE_RPM, CRUISE_RPM
             dir_left, dir_right = 1, 1
             
-        # --- Si hay tracking, manda control por visión ---
+        # Dentro del tracking:
         if tracking and detected:
             centroid, area = target
             h, w = frame.shape[0], frame.shape[1]
-
-            base = APPROACH_RPM * calc_base_y(centroid, h)   # 0 o APPROACH_RPM
-            turn = calc_turn_x(centroid, w)                  # [-1..1]
-
-            if base == 0:
-                # "Ya llegué" en Y → alinear sin RPM negativas
+            
+            cy = centroid[2]
+            turn = calc_turn_x(centroid, w)
+            
+            # Histéresis para evitar oscilaciones
+            if not mode_rotate and cy >= h * Y_TRIGGER:
+                mode_rotate = True  # Entra a modo rotación
+            elif mode_rotate and cy < h * Y_HYST:
+                mode_rotate = False  # Sale de modo rotación
+            
+            if mode_rotate:
+                # Modo rotación pura
                 rot = APPROACH_RPM * abs(turn)
-                if turn > 0:     # objeto a la derecha → gira a la derecha (ajusta si queda al revés)
-                    left_rpm, right_rpm = rot, rot
-                    dir_left, dir_right = 1, 0
-                else:            # objeto a la izquierda
+                
+                # Solo gira si el error es significativo
+                if abs(turn) < 0.1:  # deadband de rotación
+                    left_rpm, right_rpm = 0, 0
+                    dir_left, dir_right = 1, 1
+                elif turn > 0:
                     left_rpm, right_rpm = rot, rot
                     dir_left, dir_right = 0, 1
+                else:
+                    left_rpm, right_rpm = rot, rot
+                    dir_left, dir_right = 1, 0
             else:
-                dir_left, dir_right = 1, 1  # reset dirección después de enviar
-            # else:
-            #     # Avanza y corrige
-            #     left_rpm  = base - APPROACH_RPM * turn
-            #     right_rpm = base + APPROACH_RPM * turn
+                # Modo avance
+                left_rpm, right_rpm = APPROACH_RPM, APPROACH_RPM
+                dir_left, dir_right = 1, 1
 
 
         # --- Envío de comandos ---
@@ -202,8 +212,8 @@ def main():
         send_vision_data(colors, centroids, areas)
 
         # Visualización
-        video = crosslines(frame.copy())
-        cv.imshow("VISION ROVER (PC DEBUG)", video)
+        # video = crosslines(frame.copy())
+        # cv.imshow("VISION ROVER (PC DEBUG)", video)
 
         if cv.waitKey(1) & 0xFF == 27:
             break
