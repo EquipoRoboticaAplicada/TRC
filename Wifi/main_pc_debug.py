@@ -16,8 +16,6 @@ VIDEO_URL  = f"http://{PI_IP}:5000/video_feed"
 CMD_URL    = f"http://{PI_IP}:5000/command"
 VISION_URL = f"http://{PI_IP}:5000/vision_data"
 
-DETECTION_FRAMES = 8
-
 def send_rpms(left_rpm, right_rpm, dir_left, dir_right):   
     speed = {
         "left_rpm": f"S{left_rpm}",
@@ -30,7 +28,7 @@ def send_rpms(left_rpm, right_rpm, dir_left, dir_right):
         requests.post(
             CMD_URL,
             json=speed,
-            timeout=0.2
+            timeout=0.5 # tiempo máximo que tu programa esperará una respuesta del servidor antes de darse por vencido
         )
     except Exception as e:
         print("Error enviando rpms:", e)
@@ -48,13 +46,13 @@ def send_vision_data(colors, centroids, areas):
         requests.post(
             VISION_URL,
             json=payload,
-            timeout=0.1
+            timeout=0.5
         )
     except Exception as e:
         print("Error enviando vision_data:", e)
 
 
-def calc_turn_x(centroid, frame_width, deadband_px=50):
+def calc_turn_x(centroid, frame_width, deadband_px=10):
     cx = centroid[1]
     center_x = frame_width / 2
     error_px = cx - center_x
@@ -63,10 +61,10 @@ def calc_turn_x(centroid, frame_width, deadband_px=50):
         return 0.0
 
     error = error_px / (frame_width / 2)   # [-1..1]
-    Kp = 0.8                                # ahora es “estable” por tamaño
+    Kp = 5                                
     turn = Kp * error
 
-    turn = max(-1.0, min(1.0, turn))       # turn normalizado
+    turn = max(-1.0, min(1.0, turn))      
     return turn
 
 
@@ -94,6 +92,11 @@ def pick_target(centroids, areas, area_min=1500):
     centroid, area = max(candidates, key=lambda x: x[1])
     return centroid, area
 
+# Limita RPM: 0 (paro) o >= min_rpm
+def clamp_rpm(rpm, min_rpm=20):
+    if rpm < min_rpm:
+        return 0
+    return int(rpm)
 
 def main():
     cap = cv.VideoCapture(VIDEO_URL)
@@ -107,23 +110,23 @@ def main():
     # --- Parámetros de estabilidad ---
     N_ENTER = 5     # frames consecutivos para entrar a tracking (rápido)
     N_EXIT  = 10    # frames consecutivos sin target para salir (más lento)
-    AREA_MIN = 1500 # ajusta según tu escena (filtro anti-ruido)
+    AREA_MIN = 500 # ajusta según tu escena (filtro anti-ruido)
 
     seen_count = 0
     lost_count = 0
     tracking = False
 
-    SEND_HZ = 30
-    send_period = 1.0 / SEND_HZ
-    last_send = 0.0
 
-    CRUISE_RPM = 40    # velocidad default cuando no hay tracking
-    APPROACH_RPM = CRUISE_RPM  # velocidad al acercarse
+    CRUISE_RPM = 30    # velocidad default cuando no hay tracking
+    APPROACH_RPM = 25  # velocidad al acercarse
     left_rpm, right_rpm = CRUISE_RPM, CRUISE_RPM  # velocidad default
     dir_left, dir_right = 1, 1     # dirección default (1=forward, 0=backward)
 
-    base = 0
-    rot = 0
+    vision_send_counter = 0
+    VISION_SEND_EVERY = 5  # Envía cada 10 frames
+
+    command_send_counter = 0
+    COMMAND_SEND_EVERY = 2 # Envía cada 5 frames
 
     mode_rotate = False  # Estado: ¿estamos en modo rotación?
     Y_TRIGGER = 0.40
@@ -202,18 +205,23 @@ def main():
 
 
         # --- Envío de comandos ---
-        now = time.time()
-        if now - last_send >= send_period:
-            send_rpms(left_rpm, right_rpm, dir_left, dir_right)
-            last_send = now
-        # dir_left, dir_right = 1, 1  # reset dirección después de enviar
-
+        left_rpm_clamped = clamp_rpm(left_rpm, min_rpm=20)
+        right_rpm_clamped = clamp_rpm(right_rpm, min_rpm=20)
+            
         # --- Cálculo de comandos ---
-        send_vision_data(colors, centroids, areas)
+        command_send_counter += 1
+        if command_send_counter >= COMMAND_SEND_EVERY:
+            send_rpms(left_rpm_clamped, right_rpm_clamped, dir_left, dir_right)
+            command_send_counter = 0
+
+        vision_send_counter += 1
+        if vision_send_counter >= VISION_SEND_EVERY:
+            send_vision_data(colors, centroids, areas)
+            vision_send_counter = 0
 
         # Visualización
-        # video = crosslines(frame.copy())
-        # cv.imshow("VISION ROVER (PC DEBUG)", video)
+        video = crosslines(frame.copy())
+        cv.imshow("VISION ROVER (PC DEBUG)", video)
 
         if cv.waitKey(1) & 0xFF == 27:
             break
